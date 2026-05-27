@@ -1,0 +1,11 @@
+if(APPLE)
+    add_compile_definitions(CAIDE_PLATFORM_APPLE=1)
+elseif(WIN32)
+    add_compile_definitions(CAIDE_PLATFORM_WINDOWS=1)
+else()
+    add_compile_definitions(CAIDE_PLATFORM_LINUX=1)
+endif()
+
+if(MSVC)
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX)
+endif()
