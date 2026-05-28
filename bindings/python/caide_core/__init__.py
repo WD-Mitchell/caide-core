@@ -255,6 +255,106 @@ class Shape:
         )
         return Shape(out)
 
+    def shell(self, thickness: float, faces: Optional[list[int]] = None) -> "Shape":
+        out = _ffi.CaideShape()
+        arr, count = _int_array(faces)
+        _check(
+            _ffi.caide_feature_shell(self.handle, thickness, arr, count, byref(out)),
+            "caide_feature_shell",
+        )
+        return Shape(out)
+
+    def draft(
+        self,
+        angle_deg: float,
+        direction: tuple[float, float, float],
+        faces: Optional[list[int]] = None,
+    ) -> "Shape":
+        out = _ffi.CaideShape()
+        arr, count = _int_array(faces)
+        dx, dy, dz = direction
+        _check(
+            _ffi.caide_feature_draft(
+                self.handle, angle_deg, dx, dy, dz, arr, count, byref(out)
+            ),
+            "caide_feature_draft",
+        )
+        return Shape(out)
+
+    # ----- advanced shape ops -----
+
+    def extrude(self, dx: float, dy: float, dz: float) -> "Shape":
+        out = _ffi.CaideShape()
+        _check(
+            _ffi.caide_shape_extrude(self.handle, dx, dy, dz, byref(out)),
+            "caide_shape_extrude",
+        )
+        return Shape(out)
+
+    def revolve(
+        self, axis: tuple[float, float, float], angle_deg: float
+    ) -> "Shape":
+        out = _ffi.CaideShape()
+        ax, ay, az = axis
+        _check(
+            _ffi.caide_shape_revolve(self.handle, ax, ay, az, angle_deg, byref(out)),
+            "caide_shape_revolve",
+        )
+        return Shape(out)
+
+    def sweep(self, spine: "Shape") -> "Shape":
+        out = _ffi.CaideShape()
+        _check(
+            _ffi.caide_shape_sweep(self.handle, spine.handle, byref(out)),
+            "caide_shape_sweep",
+        )
+        return Shape(out)
+
+    # ----- printability -----
+
+    def wall_thickness(self) -> float:
+        """Return the kernel's estimate of the minimum wall thickness (mm)."""
+        out = c_double()
+        _check(
+            _ffi.caide_print_wall_thickness(self.handle, byref(out)),
+            "caide_print_wall_thickness",
+        )
+        return out.value
+
+    def bed_adhesion_area(self) -> float:
+        """Return the bed contact area (mm²) for the default build direction."""
+        out = c_double()
+        _check(
+            _ffi.caide_print_bed_adhesion_area(self.handle, byref(out)),
+            "caide_print_bed_adhesion_area",
+        )
+        return out.value
+
+    def support_volume(
+        self,
+        *,
+        overhang_threshold_deg: float = 45.0,
+        min_wall_thickness_mm: float = 0.4,
+        min_feature_size_mm: float = 0.2,
+        bridge_max_length_mm: float = 10.0,
+        build_direction: tuple[float, float, float] = (0.0, 0.0, 1.0),
+    ) -> float:
+        """Return the estimated support-material volume (mm³)."""
+        bx, by, bz = build_direction
+        params = _ffi.CaidePrintAnalysisParams(
+            overhang_threshold_deg,
+            min_wall_thickness_mm,
+            min_feature_size_mm,
+            bridge_max_length_mm,
+            bx, by, bz,
+        )
+        out = c_double()
+        _check(
+            _ffi.caide_print_support_volume(self.handle, byref(params), byref(out)),
+            "caide_print_support_volume",
+        )
+        return out.value
+
     # ----- export -----
 
     def export(
@@ -401,6 +501,27 @@ class Document(AbstractContextManager):
         )
         return Shape(out)
 
+    # ----- sketches -----
+
+    def sketch(self) -> "Sketch":
+        out = _ffi.CaideSketch()
+        _check(_ffi.caide_sketch_create(self.handle, byref(out)), "caide_sketch_create")
+        return Sketch(out)
+
+    # ----- multi-profile loft -----
+
+    def loft(self, profiles: list[Shape]) -> Shape:
+        if not profiles:
+            raise ValueError("loft requires at least one profile")
+        arr_type = _ffi.CaideShape * len(profiles)
+        arr = arr_type(*(p.handle for p in profiles))
+        out = _ffi.CaideShape()
+        _check(
+            _ffi.caide_shape_loft(arr, len(profiles), byref(out)),
+            "caide_shape_loft",
+        )
+        return Shape(out)
+
     # ----- history -----
 
     def undo(self) -> None:
@@ -413,12 +534,109 @@ class Document(AbstractContextManager):
         return int(_ffi.caide_document_history_count(self.handle))
 
 
+class Sketch:
+    """A 2D sketch builder. Released on ``__del__``.
+
+    Build a closed profile with ``add_line`` / ``add_arc`` / ``add_circle`` /
+    ``add_spline`` (+ optional ``close()``), then convert to a wire or face
+    with ``to_wire()`` / ``to_face()`` and feed into Shape.extrude/revolve etc.
+    """
+
+    __slots__ = ("_handle",)
+
+    def __init__(self, handle) -> None:
+        self._handle = handle
+
+    @property
+    def handle(self):
+        if self._handle is None:
+            raise RuntimeError("Sketch handle has been closed")
+        return self._handle
+
+    def close(self) -> None:
+        if self._handle is not None:
+            _ffi.caide_sketch_destroy(self._handle)
+            self._handle = None
+
+    def __del__(self) -> None:  # pragma: no cover - GC timing
+        try:
+            self.close()
+        except Exception:
+            pass
+
+    def __enter__(self) -> "Sketch":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+    # ----- entity builders -----
+
+    def add_line(self, x1: float, y1: float, x2: float, y2: float) -> "Sketch":
+        _check(
+            _ffi.caide_sketch_add_line(self.handle, x1, y1, x2, y2),
+            "caide_sketch_add_line",
+        )
+        return self
+
+    def add_arc(
+        self, cx: float, cy: float, radius: float, start_deg: float, end_deg: float
+    ) -> "Sketch":
+        _check(
+            _ffi.caide_sketch_add_arc(self.handle, cx, cy, radius, start_deg, end_deg),
+            "caide_sketch_add_arc",
+        )
+        return self
+
+    def add_circle(self, cx: float, cy: float, radius: float) -> "Sketch":
+        _check(
+            _ffi.caide_sketch_add_circle(self.handle, cx, cy, radius),
+            "caide_sketch_add_circle",
+        )
+        return self
+
+    def add_spline(self, points: list[tuple[float, float]]) -> "Sketch":
+        flat: list[float] = []
+        for p in points:
+            x, y = p
+            flat.extend((float(x), float(y)))
+        arr_type = c_double * len(flat)
+        arr = arr_type(*flat)
+        _check(
+            _ffi.caide_sketch_add_spline(self.handle, arr, len(flat)),
+            "caide_sketch_add_spline",
+        )
+        return self
+
+    def close_profile(self) -> "Sketch":
+        """Mark the sketch as a closed profile (renamed to avoid clash with ``close()``)."""
+        _check(_ffi.caide_sketch_close(self.handle), "caide_sketch_close")
+        return self
+
+    def to_face(self) -> Shape:
+        out = _ffi.CaideShape()
+        _check(
+            _ffi.caide_sketch_to_face(self.handle, byref(out)),
+            "caide_sketch_to_face",
+        )
+        return Shape(out)
+
+    def to_wire(self) -> Shape:
+        out = _ffi.CaideShape()
+        _check(
+            _ffi.caide_sketch_to_wire(self.handle, byref(out)),
+            "caide_sketch_to_wire",
+        )
+        return Shape(out)
+
+
 __all__ = [
     "CaideError",
     "Document",
     "ExportFormat",
     "PrintSeverity",
     "Shape",
+    "Sketch",
     "__version__",
     "version",
     "version_tuple",

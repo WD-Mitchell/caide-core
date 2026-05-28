@@ -429,6 +429,18 @@ caide_print_issues_free = _bind(
     "caide_print_issues_free", None, [POINTER(CaidePrintIssue), c_int]
 )
 
+caide_print_wall_thickness = _bind(
+    "caide_print_wall_thickness", c_int, [CaideShape, POINTER(c_double)]
+)
+caide_print_support_volume = _bind(
+    "caide_print_support_volume",
+    c_int,
+    [CaideShape, POINTER(CaidePrintAnalysisParams), POINTER(c_double)],
+)
+caide_print_bed_adhesion_area = _bind(
+    "caide_print_bed_adhesion_area", c_int, [CaideShape, POINTER(c_double)]
+)
+
 # Commands ------------------------------------------------------------------
 
 caide_command_execute = _bind(
@@ -442,6 +454,63 @@ caide_command_execute_batch = _bind(
     [CaideDocument, POINTER(CaideCommand), c_int],
 )
 caide_command_validate = _bind("caide_command_validate", c_int, [POINTER(CaideCommand)])
+
+# Sketch --------------------------------------------------------------------
+
+caide_sketch_create = _bind(
+    "caide_sketch_create", c_int, [CaideDocument, POINTER(CaideSketch)]
+)
+caide_sketch_destroy = _bind("caide_sketch_destroy", None, [CaideSketch])
+caide_sketch_add_line = _bind(
+    "caide_sketch_add_line",
+    c_int,
+    [CaideSketch, c_double, c_double, c_double, c_double],
+)
+caide_sketch_add_arc = _bind(
+    "caide_sketch_add_arc",
+    c_int,
+    [CaideSketch, c_double, c_double, c_double, c_double, c_double],
+)
+caide_sketch_add_circle = _bind(
+    "caide_sketch_add_circle",
+    c_int,
+    [CaideSketch, c_double, c_double, c_double],
+)
+caide_sketch_add_spline = _bind(
+    "caide_sketch_add_spline",
+    c_int,
+    [CaideSketch, POINTER(c_double), c_int],
+)
+caide_sketch_close = _bind("caide_sketch_close", c_int, [CaideSketch])
+caide_sketch_to_face = _bind(
+    "caide_sketch_to_face", c_int, [CaideSketch, POINTER(CaideShape)]
+)
+caide_sketch_to_wire = _bind(
+    "caide_sketch_to_wire", c_int, [CaideSketch, POINTER(CaideShape)]
+)
+
+# Advanced shape operations -------------------------------------------------
+
+caide_shape_extrude = _bind(
+    "caide_shape_extrude",
+    c_int,
+    [CaideShape, c_double, c_double, c_double, POINTER(CaideShape)],
+)
+caide_shape_revolve = _bind(
+    "caide_shape_revolve",
+    c_int,
+    [CaideShape, c_double, c_double, c_double, c_double, POINTER(CaideShape)],
+)
+caide_shape_sweep = _bind(
+    "caide_shape_sweep",
+    c_int,
+    [CaideShape, CaideShape, POINTER(CaideShape)],
+)
+caide_shape_loft = _bind(
+    "caide_shape_loft",
+    c_int,
+    [POINTER(CaideShape), c_int, POINTER(CaideShape)],
+)
 
 # References ----------------------------------------------------------------
 
