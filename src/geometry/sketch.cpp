@@ -5,9 +5,13 @@
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <GC_MakeSegment.hxx>
+#include <Geom_BSplineCurve.hxx>
+#include <Geom_TrimmedCurve.hxx>
 #include <GeomAPI_PointsToBSpline.hxx>
 #include <TColgp_Array1OfPnt.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Face.hxx>
+#include <TopoDS_Wire.hxx>
 #endif
 
 namespace caide::geometry {
@@ -165,11 +169,11 @@ Result<std::shared_ptr<ShapeData>> sketch_to_wire(const SketchData& sketch) {
     BRepBuilderAPI_MakeWire wire_builder;
     for (const SketchEntity& entity : sketch.entities) {
         if (entity.type == SketchEntityType::Line) {
-            wire_builder.Add(BRepBuilderAPI_MakeEdge(GC_MakeSegment(gp_Pnt(entity.points[0].x, entity.points[0].y, 0.0), gp_Pnt(entity.points[1].x, entity.points[1].y, 0.0))));
+            wire_builder.Add(BRepBuilderAPI_MakeEdge(GC_MakeSegment(gp_Pnt(entity.points[0].x, entity.points[0].y, 0.0), gp_Pnt(entity.points[1].x, entity.points[1].y, 0.0)).Value()));
         } else if (entity.type == SketchEntityType::Arc || entity.type == SketchEntityType::Circle) {
             auto samples = sample_arc(entity.points.front().x, entity.points.front().y, entity.radius, entity.start_angle, entity.end_angle, entity.type == SketchEntityType::Circle ? 24 : 16);
             for (std::size_t i = 1; i < samples.size(); ++i) {
-                wire_builder.Add(BRepBuilderAPI_MakeEdge(GC_MakeSegment(gp_Pnt(samples[i - 1].x, samples[i - 1].y, 0.0), gp_Pnt(samples[i].x, samples[i].y, 0.0))));
+                wire_builder.Add(BRepBuilderAPI_MakeEdge(GC_MakeSegment(gp_Pnt(samples[i - 1].x, samples[i - 1].y, 0.0), gp_Pnt(samples[i].x, samples[i].y, 0.0)).Value()));
             }
         } else if (entity.type == SketchEntityType::Spline) {
             TColgp_Array1OfPnt array(1, static_cast<Standard_Integer>(entity.points.size()));

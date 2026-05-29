@@ -106,7 +106,7 @@ Result<std::shared_ptr<ShapeData>> chamfer(const std::shared_ptr<ShapeData>& sha
     }
     const TopoDS_Face anchor_face = TopoDS::Face(face_map(1));
     for (int index : normalize_selection(edges, edge_map.Extent())) {
-        chamfer_builder.Add(distance, TopoDS::Edge(edge_map(index + 1)), anchor_face);
+        chamfer_builder.Add(distance, distance, TopoDS::Edge(edge_map(index + 1)), anchor_face);
     }
     chamfer_builder.Build();
     if (!chamfer_builder.IsDone()) {
