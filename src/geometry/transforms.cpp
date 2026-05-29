@@ -3,8 +3,8 @@
 #ifndef CAIDE_STUB_MODE
 #include <BRepBuilderAPI_Transform.hxx>
 #include <gp_Ax1.hxx>
+#include <gp_Ax2.hxx>
 #include <gp_Dir.hxx>
-#include <gp_Pln.hxx>
 #include <gp_Trsf.hxx>
 #include <gp_Vec.hxx>
 #endif
@@ -83,7 +83,7 @@ Result<std::shared_ptr<ShapeData>> mirror(const std::shared_ptr<ShapeData>& shap
     clone.value->params = {plane_x, plane_y, plane_z, plane_d};
 #ifndef CAIDE_STUB_MODE
     gp_Trsf trsf;
-    trsf.SetMirror(gp_Pln(gp_Pnt(plane_x * plane_d, plane_y * plane_d, plane_z * plane_d), gp_Dir(plane_x, plane_y, plane_z)));
+    trsf.SetMirror(gp_Ax2(gp_Pnt(plane_x * plane_d, plane_y * plane_d, plane_z * plane_d), gp_Dir(plane_x, plane_y, plane_z)));
     clone.value->native_shape = BRepBuilderAPI_Transform(shape->native_shape, trsf, true).Shape();
 #endif
     clear_error();
