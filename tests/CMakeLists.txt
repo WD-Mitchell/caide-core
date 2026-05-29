@@ -13,6 +13,8 @@ caide_add_cpp_test(test_sketch test_sketch.cpp)
 caide_add_cpp_test(test_advanced test_advanced.cpp)
 caide_add_cpp_test(test_commands test_commands.cpp)
 caide_add_cpp_test(test_export test_export.cpp)
+caide_add_cpp_test(test_export_step test_export_step.cpp)
+caide_add_cpp_test(test_export_gltf test_export_gltf.cpp)
 caide_add_cpp_test(test_printability test_printability.cpp)
 caide_add_cpp_test(test_references test_references.cpp)
 
