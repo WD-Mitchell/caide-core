@@ -1,8 +1,36 @@
 #include "mesh_export.h"
 
+#include <atomic>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <system_error>
+
+#ifndef _WIN32
+#include <unistd.h>
+#else
+#include <process.h>
+#define getpid _getpid
+#endif
+
+#ifndef CAIDE_STUB_MODE
+#include <BRepMesh_IncrementalMesh.hxx>
+#include <IFSelect_ReturnStatus.hxx>
+#include <Interface_Static.hxx>
+#include <Message_ProgressRange.hxx>
+#include <RWGltf_CafWriter.hxx>
+#include <STEPControl_StepModelType.hxx>
+#include <STEPControl_Writer.hxx>
+#include <TCollection_AsciiString.hxx>
+#include <TColStd_IndexedDataMapOfStringString.hxx>
+#include <TDF_Label.hxx>
+#include <TDocStd_Application.hxx>
+#include <TDocStd_Document.hxx>
+#include <XCAFApp_Application.hxx>
+#include <XCAFDoc_DocumentTool.hxx>
+#include <XCAFDoc_ShapeTool.hxx>
+#endif
 
 namespace caide::exporter {
 
@@ -136,6 +164,127 @@ std::vector<uint8_t> make_gltf_placeholder(const ShapeData& shape, const MeshDat
     return std::vector<uint8_t>(text.begin(), text.end());
 }
 
+#ifndef CAIDE_STUB_MODE
+
+std::filesystem::path unique_temp_path(const char* suffix) {
+    static std::atomic<uint64_t> counter {0};
+    const auto seq = counter.fetch_add(1U, std::memory_order_relaxed);
+    std::ostringstream name;
+    name << "caide_export_" << ::getpid() << '_' << seq << suffix;
+    return std::filesystem::temp_directory_path() / name.str();
+}
+
+std::vector<uint8_t> read_file_bytes(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input.is_open()) {
+        return {};
+    }
+    input.seekg(0, std::ios::end);
+    const auto end_pos = input.tellg();
+    if (end_pos <= 0) {
+        return {};
+    }
+    const std::size_t size = static_cast<std::size_t>(end_pos);
+    input.seekg(0, std::ios::beg);
+    std::vector<uint8_t> bytes(size);
+    input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
+    return bytes;
+}
+
+Status occt_write_step(const ShapeData& shape, const std::string& path) {
+    if (shape.native_shape.IsNull()) {
+        return set_error(CAIDE_ERR_EXPORT_FAILED, "shape has no native OCCT representation");
+    }
+    Interface_Static::SetCVal("write.step.schema", "AP214CD");
+    Interface_Static::SetCVal("write.step.unit", "MM");
+    STEPControl_Writer writer;
+    const IFSelect_ReturnStatus transfer = writer.Transfer(shape.native_shape, STEPControl_AsIs);
+    if (transfer != IFSelect_RetDone) {
+        return set_error(CAIDE_ERR_EXPORT_FAILED, "STEPControl_Writer::Transfer failed");
+    }
+    const IFSelect_ReturnStatus write = writer.Write(path.c_str());
+    if (write != IFSelect_RetDone) {
+        return set_error(CAIDE_ERR_EXPORT_FAILED, "STEPControl_Writer::Write failed");
+    }
+    return Status::ok();
+}
+
+Status occt_write_gltf(const ShapeData& shape, const std::string& path, bool is_binary,
+                       const CaideTessellationParams& tess) {
+    if (shape.native_shape.IsNull()) {
+        return set_error(CAIDE_ERR_EXPORT_FAILED, "shape has no native OCCT representation");
+    }
+    BRepMesh_IncrementalMesh mesher(shape.native_shape,
+                                    tess.linear_deflection,
+                                    tess.relative != 0,
+                                    tess.angular_deflection,
+                                    Standard_True);
+    mesher.Perform();
+    if (!mesher.IsDone()) {
+        return set_error(CAIDE_ERR_EXPORT_FAILED, "BRepMesh_IncrementalMesh failed");
+    }
+
+    Handle(TDocStd_Application) app = XCAFApp_Application::GetApplication();
+    Handle(TDocStd_Document) doc;
+    app->NewDocument("MDTV-XCAF", doc);
+    Handle(XCAFDoc_ShapeTool) shape_tool = XCAFDoc_DocumentTool::ShapeTool(doc->Main());
+    shape_tool->AddShape(shape.native_shape);
+
+    const TCollection_AsciiString out_path(path.c_str());
+    RWGltf_CafWriter writer(out_path, is_binary);
+    TColStd_IndexedDataMapOfStringString metadata;
+    metadata.Add(TCollection_AsciiString("Generator"), TCollection_AsciiString("caide-core"));
+    const bool ok = writer.Perform(doc, metadata, Message_ProgressRange());
+    if (!ok) {
+        return set_error(CAIDE_ERR_EXPORT_FAILED, "RWGltf_CafWriter::Perform failed");
+    }
+    return Status::ok();
+}
+
+std::vector<uint8_t> make_step_occt(const ShapeData& shape, Status& out_status) {
+    const auto path = unique_temp_path(".step");
+    auto status = occt_write_step(shape, path.string());
+    if (!status) {
+        out_status = status;
+        std::error_code ec;
+        std::filesystem::remove(path, ec);
+        return {};
+    }
+    auto bytes = read_file_bytes(path);
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    if (bytes.empty()) {
+        out_status = set_error(CAIDE_ERR_EXPORT_FAILED, "STEP output file was empty");
+        return {};
+    }
+    out_status = Status::ok();
+    return bytes;
+}
+
+std::vector<uint8_t> make_gltf_occt(const ShapeData& shape,
+                                    const CaideTessellationParams& tess,
+                                    Status& out_status) {
+    const auto path = unique_temp_path(".glb");
+    auto status = occt_write_gltf(shape, path.string(), /*is_binary=*/true, tess);
+    if (!status) {
+        out_status = status;
+        std::error_code ec;
+        std::filesystem::remove(path, ec);
+        return {};
+    }
+    auto bytes = read_file_bytes(path);
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    if (bytes.empty()) {
+        out_status = set_error(CAIDE_ERR_EXPORT_FAILED, "glTF output file was empty");
+        return {};
+    }
+    out_status = Status::ok();
+    return bytes;
+}
+
+#endif  // !CAIDE_STUB_MODE
+
 }  // namespace
 
 Result<std::vector<uint8_t>> export_to_buffer(const std::shared_ptr<ShapeData>& shape, CaideExportFormat format, const CaideTessellationParams* params) {
@@ -162,12 +311,35 @@ Result<std::vector<uint8_t>> export_to_buffer(const std::shared_ptr<ShapeData>& 
         case CAIDE_FORMAT_3MF:
             buffer = make_3mf(*shape, *mesh_result.value);
             break;
-        case CAIDE_FORMAT_STEP:
+        case CAIDE_FORMAT_STEP: {
+#ifndef CAIDE_STUB_MODE
+            if (!shape->native_shape.IsNull()) {
+                Status step_status;
+                buffer = make_step_occt(*shape, step_status);
+                if (!step_status) {
+                    return {step_status, {}};
+                }
+                break;
+            }
+#endif
             buffer = make_step_placeholder(*shape);
             break;
-        case CAIDE_FORMAT_GLTF:
+        }
+        case CAIDE_FORMAT_GLTF: {
+#ifndef CAIDE_STUB_MODE
+            if (!shape->native_shape.IsNull()) {
+                const CaideTessellationParams tess = normalized_params(params);
+                Status gltf_status;
+                buffer = make_gltf_occt(*shape, tess, gltf_status);
+                if (!gltf_status) {
+                    return {gltf_status, {}};
+                }
+                break;
+            }
+#endif
             buffer = make_gltf_placeholder(*shape, *mesh_result.value);
             break;
+        }
         default:
             return {set_error(CAIDE_ERR_EXPORT_FAILED, "unsupported export format"), {}};
     }

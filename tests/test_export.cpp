@@ -33,9 +33,15 @@ int main() {
     auto step = caide::exporter::export_to_buffer(box.value, CAIDE_FORMAT_STEP, nullptr);
     CHECK(step);
     CHECK(step.value.size() > 32U);
+    CHECK(std::string(step.value.begin(), step.value.begin() + 13) == "ISO-10303-21;");
 
     auto gltf = caide::exporter::export_to_buffer(box.value, CAIDE_FORMAT_GLTF, nullptr);
     CHECK(gltf);
+    CHECK(gltf.value.size() > 16U);
+#ifdef CAIDE_STUB_MODE
     CHECK(std::string(gltf.value.begin(), gltf.value.begin() + 1) == "{");
+#else
+    CHECK(gltf.value[0] == 'g' && gltf.value[1] == 'l' && gltf.value[2] == 'T' && gltf.value[3] == 'F');
+#endif
     return 0;
 }
